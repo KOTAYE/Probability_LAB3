@@ -1,0 +1,294 @@
+---
+title: 'P&S-2025: Lab assignment 3'
+author: "Mykyta Yahoda, Anastasiia Shopska, Viktor Syrotiuk"
+output:
+  html_document:
+    df_print: paged
+---
+
+------------------------------------------------------------------------
+
+**Viktor Syrotiuk : Task 1**
+
+**Anastasiia Shopska : Task 2**
+
+**Mykyta Yahoda : Task 3**
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(knitr)
+```
+
+### Task 1
+
+## SETUP
+
+```{r}
+set.seed(15)
+team_id <- 15
+theta   <- team_id / 10
+lambda  <- 1 / theta
+
+cat("Team ID:", team_id, "\n")
+cat("θ =", theta, "\n")
+cat("λ =", lambda, "\n\n")
+```
+
+## CONFIDENCE INTERVAL METHODS
+
+```{r}
+ci_exp_chisq <- function(x, alpha){
+  n    <- length(x)
+  xbar <- mean(x)
+  df   <- 2 * n
+  
+  lower <- 2 * n * xbar / qchisq(1 - alpha/2, df = df)
+  upper <- 2 * n * xbar / qchisq(alpha/2, df = df)
+  c(lower = lower, upper = upper)
+}
+
+ci_exp_normal_truevar <- function(x, alpha, theta_true){
+  n    <- length(x)
+  xbar <- mean(x)
+  z    <- qnorm(1 - alpha/2)
+  half <- z * theta_true / sqrt(n)
+  c(lower = xbar - half, upper = xbar + half)
+}
+
+ci_exp_normal_reparam <- function(x, alpha){
+  n    <- length(x)
+  xbar <- mean(x)
+  z    <- qnorm(1 - alpha/2)
+  a    <- z / sqrt(n)
+  
+  lower <- xbar / (1 + a)
+  upper <- xbar / (1 - a)
+  c(lower = lower, upper = upper)
+}
+
+ci_exp_t <- function(x, alpha){
+  n    <- length(x)
+  xbar <- mean(x)
+  s    <- sd(x)
+  tval <- qt(1 - alpha/2, df = n - 1)
+  half <- tval * s / sqrt(n)
+  c(lower = xbar - half, upper = xbar + half)
+}
+
+```
+
+## SIMULATION FUNCTION
+
+```{r}
+simulate_exp_ci <- function(theta, n, m, alpha){
+  lambda <- 1 / theta
+  
+  cover_counts <- numeric(4)
+  length_sums  <- numeric(4)
+  widths_store <- matrix(NA, nrow = m, ncol = 4)
+  
+  for (i in 1:m){
+    x <- rexp(n, rate = lambda)
+    
+    ci1 <- ci_exp_chisq(x, alpha)
+    ci2 <- ci_exp_normal_truevar(x, alpha, theta_true = theta)
+    ci3 <- ci_exp_normal_reparam(x, alpha)
+    ci4 <- ci_exp_t(x, alpha)
+    
+    cis <- list(ci1, ci2, ci3, ci4)
+    
+    for (k in 1:4){
+      lower <- cis[[k]][1]
+      upper <- cis[[k]][2]
+      width <- upper - lower
+      
+      if (lower <= theta && theta <= upper){
+        cover_counts[k] <- cover_counts[k] + 1
+      }
+      length_sums[k] <- length_sums[k] + width
+      widths_store[i, k] <- width
+    }
+  }
+  
+  list(
+    summary = data.frame(
+      method = c("χ² Exact", "Normal (True Var)", "Normal (Reparam)", "t-interval"),
+      alpha  = alpha,
+      n      = n,
+      m      = m,
+      coverage = cover_counts / m,
+      mean_length = length_sums / m,
+      se_coverage = sqrt((cover_counts/m) * (1 - cover_counts/m) / m)
+    ),
+    widths = widths_store
+  )
+}
+
+```
+
+## RUN SIMULATIONS
+
+```{r}
+alphas <- c(0.1, 0.05, 0.01)
+n_vec  <- c(10, 30, 100, 300)
+m      <- 5000
+
+results_list <- list()
+all_widths <- list()
+
+cat("Running simulations...\n")
+for (n in n_vec){
+  for (alpha in alphas){
+    cat(sprintf("  n=%d, α=%.2f\n", n, alpha))
+    res <- simulate_exp_ci(theta = theta, n = n, m = m, alpha = alpha)
+    results_list[[length(results_list) + 1]] <- res$summary
+    all_widths[[paste0("n", n, "_a", alpha)]] <- res$widths
+  }
+}
+
+results <- do.call(rbind, results_list)
+results$nominal_coverage <- 1 - results$alpha
+
+```
+
+## SIMULATION RESULTS
+
+```{r}
+print(results)
+```
+
+## VISUALIZATION 1: Coverage Probability
+
+```{r}
+p1 <- ggplot(results, aes(x = factor(n), y = coverage, color = method, group = method)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_hline(aes(yintercept = nominal_coverage), linetype = "dashed", color = "black") +
+  facet_wrap(~alpha, labeller = label_both) +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Coverage Probability vs Sample Size",
+    subtitle = paste("True theta =", theta, ", m =", m, "simulations"),
+    x = "Sample size (n)",
+    y = "Empirical coverage probability",
+    color = "Method"
+  ) +
+  theme(legend.position = "bottom") +
+  coord_cartesian(ylim = c(0.85, 1.0))
+
+print(p1)
+```
+
+## VISUALIZATION 2: Mean CI Length
+
+```{r}
+p2 <- ggplot(results, aes(x = factor(n), y = mean_length, color = method, group = method)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  facet_wrap(~alpha, labeller = label_both, scales = "free_y") +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Mean Confidence Interval Length vs Sample Size",
+    x = "Sample size (n)",
+    y = "Mean interval length",
+    color = "Method"
+  ) +
+  theme(legend.position = "bottom")
+
+print(p2)
+```
+
+## VISUALIZATION 3: Distribution of CI Widths (for n=30, α=0.05)
+
+```{r}
+widths_df <- data.frame(
+  width = c(all_widths[["n30_a0.05"]]),
+  method = rep(c("Chi-squared Exact", "Normal (True Var)", "Normal (Reparam)", "t-interval"), 
+               each = m)
+)
+
+p3 <- ggplot(widths_df, aes(x = width, fill = method)) +
+  geom_histogram(bins = 50, alpha = 0.7) +
+  facet_wrap(~method, scales = "free", ncol = 2) +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Distribution of CI Widths",
+    subtitle = "n = 30, alpha = 0.05",
+    x = "Interval width",
+    y = "Frequency"
+  ) +
+  theme(legend.position = "none")
+
+print(p3)
+```
+
+## VISUALIZATION 4: Efficiency Comparison
+
+```{r}
+results$efficiency <- results$coverage / results$mean_length
+
+p4 <- ggplot(results, aes(x = mean_length, y = coverage, color = method, shape = factor(n))) +
+  geom_point(size = 4, alpha = 0.7) +
+  geom_hline(aes(yintercept = nominal_coverage), linetype = "dashed") +
+  facet_wrap(~alpha, labeller = label_both) +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Coverage vs Mean Length (Efficiency Trade-off)",
+    x = "Mean interval length",
+    y = "Coverage probability",
+    color = "Method",
+    shape = "n"
+  ) +
+  theme(legend.position = "bottom")
+
+print(p4)
+```
+
+## STATISTICAL ANALYSIS
+
+```{r}
+
+results$lower_bound <- results$nominal_coverage - 2 * results$se_coverage
+results$upper_bound <- results$nominal_coverage + 2 * results$se_coverage
+results$coverage_ok <- with(results, coverage >= lower_bound & coverage <= upper_bound)
+
+cat("\nCoverage within 95% confidence bounds:\n")
+print(table(results$method, results$coverage_ok))
+
+best_methods <- results[results$coverage_ok, ]
+best_methods <- best_methods[order(best_methods$n, best_methods$alpha, best_methods$mean_length), ]
+best_methods <- best_methods[!duplicated(paste(best_methods$n, best_methods$alpha)), ]
+
+print(best_methods[, c("n", "alpha", "method", "coverage", "mean_length")], 
+      digits = 4, row.names = FALSE)
+```
+
+## SAMPLE ILLUSTRATION
+
+```{r}
+set.seed(15)
+n_sample <- 30
+x_sample <- rexp(n_sample, rate = lambda)
+
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
+
+hist(x_sample, breaks = 20, probability = TRUE,
+     main = paste("Sample from Exp(λ), n =", n_sample),
+     xlab = "X", col = "lightblue", border = "white")
+curve(dexp(x, rate = lambda), add = TRUE, col = "red", lwd = 2)
+abline(v = theta, col = "darkgreen", lwd = 2, lty = 2)
+legend("topright", c("True density", "True θ"), 
+       col = c("red", "darkgreen"), lwd = 2, lty = c(1, 2))
+
+qqplot(qexp(ppoints(n_sample), rate = lambda), x_sample,
+       main = "Q-Q Plot: Sample vs Exp(λ)",
+       xlab = "Theoretical quantiles", ylab = "Sample quantiles")
+abline(0, 1, col = "red", lwd = 2)
+
+par(mfrow = c(1, 1))
+```
+
+## CONCLUSIONS
+
+Based on the results of the simulations, the chi-square confidence interval appears to be the best of the four methods. It consistently provides coverage that is closest to the nominal level, even when the sample size is small, because it is derived from the exact sampling distribution of the exponential distribution. In addition, it usually produces the shortest interval lengths among all methods that achieve correct coverage, which means that it is both accurate and efficient. The normal approximation with the true variance performs well in theory, but it cannot be used in practice because it requires knowing the true parameter. The re-parameterized normal interval and the t-interval both improve when the sample size becomes larger, but for small and moderate samples their coverage can deviate more from the target level and their intervals tend to be wider. For these reasons, the chi-square method is the most reliable and practical choice for constructing confidence intervals for the mean of an exponential distribution.
