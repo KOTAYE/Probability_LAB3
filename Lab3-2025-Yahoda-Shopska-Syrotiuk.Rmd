@@ -292,3 +292,376 @@ par(mfrow = c(1, 1))
 ## CONCLUSIONS
 
 Based on the results of the simulations, the chi-square confidence interval appears to be the best of the four methods. It consistently provides coverage that is closest to the nominal level, even when the sample size is small, because it is derived from the exact sampling distribution of the exponential distribution. In addition, it usually produces the shortest interval lengths among all methods that achieve correct coverage, which means that it is both accurate and efficient. The normal approximation with the true variance performs well in theory, but it cannot be used in practice because it requires knowing the true parameter. The re-parameterized normal interval and the t-interval both improve when the sample size becomes larger, but for small and moderate samples their coverage can deviate more from the target level and their intervals tend to be wider. For these reasons, the chi-square method is the most reliable and practical choice for constructing confidence intervals for the mean of an exponential distribution.
+
+# Problem 2
+
+## 1. Setup and Parameters
+
+```{r}
+set.seed(15) 
+team_id <- 15 
+theta   <- team_id / 10   
+cat("Team ID:", team_id, "\n") 
+cat("Poisson Parameter θ (λ) =", theta, "\n") 
+```
+
+## 2. Confidence Interval Methods for Poisson
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(knitr)
+
+ci_poi_score <- function(x, alpha){
+  n    <- length(x)
+  xbar <- mean(x)
+  Z    <- qnorm(1 - alpha/2)
+  Z_sq <- Z^2
+  lower_num <- 2 * n * xbar + Z_sq - Z * sqrt(4 * n * xbar + Z_sq)
+  lower_den <- 2 * (n + Z_sq)
+  
+  upper_num <- 2 * n * xbar + Z_sq + Z * sqrt(4 * n * xbar + Z_sq)
+  upper_den <- 2 * (n + Z_sq)
+  
+  c(lower = lower_num / lower_den, upper = upper_num / upper_den)
+}
+
+ci_poi_normal_truevar <- function(x, alpha, theta_true){
+  n    <- length(x)
+  xbar <- mean(x)
+  Z    <- qnorm(1 - alpha/2)
+  half <- Z * sqrt(theta_true / n) 
+  c(lower = xbar - half, upper = xbar + half)
+}
+
+ci_poi_normal_wald <- function(x, alpha){
+  n    <- length(x)
+  xbar <- mean(x)
+  Z    <- qnorm(1 - alpha/2)
+  half <- Z * sqrt(xbar / n)
+  c(lower = xbar - half, upper = xbar + half)
+}
+
+ci_poi_t <- function(x, alpha){
+  n    <- length(x)
+  xbar <- mean(x)
+  s    <- sd(x)
+  tval <- qt(1 - alpha/2, df = n - 1)
+  half <- tval * s / sqrt(n)
+  c(lower = xbar - half, upper = xbar + half)
+}
+ 
+```
+
+## 3. Monte Carlo Simulation Function
+
+```{r}
+simulate_poi_ci <- function(theta, n, m, alpha){
+  
+  cover_counts <- numeric(4)
+  length_sums  <- numeric(4)
+  widths_store <- matrix(NA, nrow = m, ncol = 4)
+  
+  for (i in 1:m){
+    x <- rpois(n, lambda = theta) 
+    
+    ci1 <- ci_poi_score(x, alpha)
+    ci2 <- ci_poi_normal_truevar(x, alpha, theta_true = theta)
+    ci3 <- ci_poi_normal_wald(x, alpha)
+    ci4 <- ci_poi_t(x, alpha)
+    
+    cis <- list(ci1, ci2, ci3, ci4)
+    
+    for (k in 1:4){
+      lower <- cis[[k]][1]
+      upper <- cis[[k]][2]
+      width <- upper - lower
+      
+      # Check for coverage
+      if (lower <= theta && theta <= upper){
+        cover_counts[k] <- cover_counts[k] + 1
+      }
+      length_sums[k] <- length_sums[k] + width
+      widths_store[i, k] <- width
+    }
+  }
+  
+  list(
+    summary = data.frame(
+      method = c("Score Interval (Exact Analog)", "Normal (True Var - Part 2)", "Normal (Wald/MLE - Part 3)", "t-interval (Part 4)"),
+      alpha  = alpha,
+      n      = n,
+      m      = m,
+      coverage = cover_counts / m,
+      mean_length = length_sums / m,
+      se_coverage = sqrt((cover_counts/m) * (1 - cover_counts/m) / m) 
+    ),
+    widths = widths_store
+  )
+}
+
+```
+
+## 4. Run Simulations and Results
+
+```{r}
+alphas <- c(0.1, 0.05, 0.01)
+n_vec  <- c(10, 30, 100, 300)
+m      <- 5000 
+
+results_list <- list()
+all_widths <- list()
+
+cat("Running Poisson CI simulations...\n")
+for (n in n_vec){
+  for (alpha in alphas){
+    if(n == 300 & alpha == 0.01) {
+      cat(sprintf("  n=%d, α=%.2f\n", n, alpha))
+      res <- simulate_poi_ci(theta = theta, n = n, m = m, alpha = alpha)
+      results_list[[length(results_list) + 1]] <- res$summary
+      all_widths[[paste0("n", n, "_a", alpha)]] <- res$widths
+    } else {
+      cat(sprintf("  n=%d, α=%.2f\n", n, alpha))
+      res <- simulate_poi_ci(theta = theta, n = n, m = m, alpha = alpha)
+      results_list[[length(results_list) + 1]] <- res$summary
+      all_widths[[paste0("n", n, "_a", alpha)]] <- res$widths
+    }
+  }
+}
+
+results <- do.call(rbind, results_list)
+results$nominal_coverage <- 1 - results$alpha
+
+cat("\nSimulation Results Summary:\n")
+print(results)
+ 
+```
+
+## 5. Visualization
+
+### 5.1 Coverage Probability
+
+```{r}
+p1_poi <- ggplot(results, aes(x = factor(n), y = coverage, color = method, group = method)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = coverage - 2 * se_coverage, ymax = coverage + 2 * se_coverage), 
+                width = 0.1, linewidth = 0.5) +
+  geom_hline(aes(yintercept = nominal_coverage), linetype = "dashed", color = "black") +
+  facet_wrap(~alpha, labeller = label_both) +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Coverage Probability vs Sample Size (Poisson)",
+    subtitle = paste("True θ =", theta, ", m =", m, "simulations. Error bars show 95% CI for coverage probability."),
+    x = "Sample size (n)",
+    y = "Empirical coverage probability",
+    color = "Method"
+  ) +
+  theme(legend.position = "bottom") +
+  coord_cartesian(ylim = c(0.8, 1.0))
+
+print(p1_poi)
+```
+
+### 5.2 Mean CI Length
+
+```{r}
+p2_poi <- ggplot(results, aes(x = factor(n), y = mean_length, color = method, group = method)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  facet_wrap(~alpha, labeller = label_both, scales = "free_y") +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Mean Confidence Interval Length vs Sample Size (Poisson)",
+    x = "Sample size (n)",
+    y = "Mean interval length",
+    color = "Method"
+  ) +
+  theme(legend.position = "bottom")
+
+print(p2_poi)
+```
+
+### 5.3 Distribution of CI Widths (for n=30, alpha=0.05)
+
+```{r}
+library(ggplot2)
+
+p3_poi_density <- ggplot(widths_df_poi, aes(x = width, fill = method)) +
+  geom_density(alpha = 0.6) +
+  
+  facet_wrap(~method, scales = "free", ncol = 2) +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Distribution of CI Widths (Poisson) - Density Plot",
+    subtitle = "n = 30, alpha = 0.05. Density plot removes binning artifacts for clearer shape.",
+    x = "Interval width",
+    y = "Density",
+    fill = "Method"
+  ) +
+  theme(legend.position = "none")
+
+print(p3_poi_density)
+
+```
+
+### 5.4 Efficiency Comparison
+
+```{r}
+if (!requireNamespace("dplyr", quietly = TRUE)) {
+  install.packages("dplyr")
+}
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+  install.packages("ggplot2")
+}
+library(dplyr)
+library(ggplot2)
+if (!exists("results") && file.exists("temp_results.RData")) {
+  message("Attempting to load 'results' data from temp_results.RData...")
+  load("temp_results.RData")
+}
+
+if (exists("results") && is.data.frame(results) && nrow(results) > 0) {
+
+  length_col_name <- names(results)[grepl("length|width|len|ci_length|ci_width", names(results), ignore.case = TRUE)][1]
+  
+  if (is.na(length_col_name)) {
+    if (any(grepl("upper", names(results), ignore.case = TRUE)) && any(grepl("lower", names(results), ignore_case = TRUE))) {
+      upper_col <- names(results)[grepl("upper", names(results), ignore.case = TRUE)][1]
+      lower_col <- names(results)[grepl("lower", names(results), ignore_case = TRUE)][1]
+      results <- results %>% 
+        mutate(length = .data[[upper_col]] - .data[[lower_col]])
+      length_col_name <- "length"
+      message("Calculated 'length' column as upper_bound - lower_bound.")
+    }
+  }
+  coverage_col_name <- names(results)[grepl("nominal|coverage_level|alpha", names(results), ignore.case = TRUE)][1]
+
+  if (is.na(length_col_name)) {
+    stop("Could not find a column for CI Length/Width. Please check your 'results' data frame and update the plot code.")
+  }
+  
+  if (is.na(coverage_col_name)) {
+    stop("Could not find a column for Nominal Coverage. Please check your 'results' data frame and update the plot code.")
+  }
+  
+  message(paste("Using Length Column:", length_col_name))
+  message(paste("Using Nominal Coverage Column:", coverage_col_name))
+  p1 <- ggplot(results, aes(x = .data[[length_col_name]], fill = method)) +
+    geom_histogram(aes(y = after_stat(density)), bins = 30, alpha = 0.5, position = "identity") +
+    facet_grid(.data[[coverage_col_name]] ~ n, scales = "free_x", 
+               labeller = labeller(
+                 .cols = function(x) paste0("n=", x),
+                 .rows = function(x) paste0(as.numeric(x)*100, "% CI") 
+               )) +
+    labs(
+      title = "Distribution of Confidence Interval Lengths (Histogram)",
+      subtitle = "Bins show the frequency of interval lengths. Shorter lengths mean better precision.",
+      x = paste("Confidence Interval Length (", length_col_name, ")"),
+      y = "Density",
+      fill = "Method"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+
+  print(p1)
+
+  if ("is_covered" %in% names(results)) {
+    worst_case_data <- results %>%
+      filter(as.numeric(n) == 10, as.numeric(.data[[coverage_col_name]]) == 0.99)
+    
+    p2 <- ggplot(worst_case_data, aes(x = factor(is_covered), fill = method)) +
+      geom_bar(position = "dodge") +
+      labs(
+        title = "Empirical Coverage Success/Failure (Worst Case: n=10, 99% CI)",
+        subtitle = "Shows how often the interval failed (0) or succeeded (1) in covering the true mean.",
+        x = "Interval Covered True Parameter (0 = Failure, 1 = Success)",
+        y = "Count of Simulation Runs",
+        fill = "Method"
+      ) +
+      scale_x_discrete(labels = c("0" = "Failure (Not Covered)", "1" = "Success (Covered)")) +
+      theme_minimal() +
+      theme(legend.position = "bottom")
+
+    print(p2)
+  } else {
+    message("Skipping Coverage Bar Plot: Column 'is_covered' (binary 0/1 coverage status) not found.")
+  }
+  
+} else {
+  cat("Skipping Histograms: The raw 'results' data frame could not be found or loaded.\n")
+}
+
+
+
+```
+
+## 6. Sample Illustration (n=30)
+
+This section illustrates a single sample's properties and the resulting confidence intervals for \$\\theta\$.
+
+```{r}
+set.seed(15)
+n_sample <- 30
+x_sample <- rpois(n_sample, lambda = theta)
+
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
+hist(x_sample, breaks = seq(min(x_sample)-0.5, max(x_sample)+0.5, by=1), probability = TRUE,
+     main = paste("Sample from P(θ), n =", n_sample),
+     xlab = "X (Count)", col = "lightblue", border = "white")
+points(0:max(x_sample), dpois(0:max(x_sample), lambda = theta), col = "red", pch = 16) # Plot true PMF points
+segments(0:max(x_sample), 0, 0:max(x_sample), dpois(0:max(x_sample), lambda = theta), col = "red", lwd = 2)
+
+abline(v = theta, col = "darkgreen", lwd = 2, lty = 2)
+legend("topright", c("True PMF", "True θ", "Sample"), 
+       col = c("red", "darkgreen", "lightblue"), lwd = 2, lty = c(1, 2, 0), pch = c(16, NA, 22), 
+       pt.bg = c(NA, NA, "lightblue"))
+
+qqplot(qpois(ppoints(n_sample), lambda = theta), x_sample,
+       main = "Q-Q Plot: Sample vs P(θ)",
+       xlab = "Theoretical quantiles (P(θ))", ylab = "Sample quantiles")
+abline(0, 1, col = "red", lwd = 2)
+
+par(mfrow = c(1, 1))
+
+alpha_sample <- 0.05
+ci_results_sample <- data.frame(
+  Method = c(
+    "Score Interval (Exact Analog)", 
+    "Normal (True Var - Part 2)", 
+    "Normal (Wald/MLE - Part 3)", 
+    "t-interval (Part 4)"
+  ),
+  Lower = NA, Upper = NA, Contains_Theta = NA
+)
+
+# Fill in CI results
+ci_results_sample[1, 2:3] <- ci_poi_score(x_sample, alpha_sample)
+ci_results_sample[2, 2:3] <- ci_poi_normal_truevar(x_sample, alpha_sample, theta)
+ci_results_sample[3, 2:3] <- ci_poi_normal_wald(x_sample, alpha_sample)
+ci_results_sample[4, 2:3] <- ci_poi_t(x_sample, alpha_sample)
+
+ci_results_sample$Contains_Theta <- with(ci_results_sample, Lower <= theta & theta <= Upper)
+
+cat("\nSample Statistics (n = 30):\n")
+cat("Sample Mean (Xbar):", mean(x_sample), "\n")
+cat("Sample Variance (S^2):", var(x_sample), "\n\n")
+
+cat(sprintf("Confidence Intervals for θ = %.1f (α = %.2f):\n", theta, alpha_sample))
+print(ci_results_sample)
+ 
+```
+
+## 7. Conclusions
+
+Based on the simulation results for the Poisson distribution (where the variance sigma\^2 equals the mean theta), the **Score Interval** (our adapted replacement for the Exact CI) proves to be the most reliable method. It consistently maintains the empirical coverage closest to the nominal level (e.g., 0.95), especially for smaller sample sizes (n=10, 30).
+
+The other approximation methods:
+
+-   **Normal (True Var - Part 2):** Provides the shortest interval length but is unusable in practice as it requires knowing the true theta. It serves as a good benchmark.
+
+-   **Normal (Wald/MLE - Part 3):** This method estimates the variance using \$\\bar{X}\$. For small \$n\$, it shows noticeable **undercoverage** (its empirical coverage is too low), violating the desired confidence level.
+
+-   **t-interval (Part 4):** This interval also struggles with undercoverage for small samples, showing the pitfalls of relying on the Central Limit Theorem when the underlying distribution is discrete and the mean is small (theta=1.5).
+
+The core takeaway, consistent with the Exponential task, is that **exact** or **score-based methods** perform much better than simple Normal or t-approximations, particularly when the sample size is small, or the variance relationship is sensitive (like in Poisson or Exponential distributions).
