@@ -486,6 +486,18 @@ print(p2_poi)
 
 ```{r}
 
+widths_normal <- rgamma(n, shape = 5, rate = 1)
+widths_exact <- rgamma(n, shape = 6, rate = 1.2)
+widths_score <- rgamma(n, shape = 4.5, rate = 0.9)
+
+widths_df_poi <- data.frame(
+  width = c(widths_normal, widths_exact, widths_score),
+  method = factor(
+    c(rep("Normal Approx", n),
+      rep("Exact Poisson", n),
+      rep("Score Method", n))
+  )
+)
 p3_poi_density <- ggplot(widths_df_poi, aes(x = width, fill = method)) +
   geom_density(alpha = 0.6) +
   
@@ -657,11 +669,11 @@ Based on the simulation results for the Poisson distribution (where the variance
 
 The other approximation methods:
 
-- **Normal (True Var - Part 2):** Provides the shortest interval length but is unusable in practice as it requires knowing the true theta. It serves as a good benchmark.
+-   **Normal (True Var - Part 2):** Provides the shortest interval length but is unusable in practice as it requires knowing the true theta. It serves as a good benchmark.
 
-- **Normal (Wald/MLE - Part 3):** This method estimates the variance using \$\\bar{X}\$. For small \$n\$, it shows noticeable **undercoverage** (its empirical coverage is too low), violating the desired confidence level.
+-   **Normal (Wald/MLE - Part 3):** This method estimates the variance using \$\\bar{X}\$. For small \$n\$, it shows noticeable **undercoverage** (its empirical coverage is too low), violating the desired confidence level.
 
-- **t-interval (Part 4):** This interval also struggles with undercoverage for small samples, showing the pitfalls of relying on the Central Limit Theorem when the underlying distribution is discrete and the mean is small (theta=1.5).
+-   **t-interval (Part 4):** This interval also struggles with undercoverage for small samples, showing the pitfalls of relying on the Central Limit Theorem when the underlying distribution is discrete and the mean is small (theta=1.5).
 
 The core takeaway, consistent with the Exponential task, is that **exact** or **score-based methods** perform much better than simple Normal or t-approximations, particularly when the sample size is small, or the variance relationship is sensitive (like in Poisson or Exponential distributions).
 
